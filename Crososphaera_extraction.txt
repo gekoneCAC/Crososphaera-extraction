@@ -1,0 +1,1155 @@
+//{ variables
+// Claiming variables with "var" in front allows them to be carried between macros.
+var dirIMG = "empty";
+var splitDir0 = "empty";
+var splitDirORG = "empty";
+var splitDirPNG = "empty";
+var splitDirMAS = "empty";
+var splitDirLAM = "empty";
+
+var image_name = "empty";
+var image_name_cut = "empty";
+var lambda_name = "empty";
+var lambda_name_cut = "empty";
+var varFrames = 0;
+var varSlices = 0;
+var varWidth = 0;
+var varHeight = 0;
+var varChannels = 0;
+var varIntervals = 0;
+
+
+
+/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/
+macro "closeAll [0]"{
+// I like having this all-around macro to get rid of unnecessary windows.
+totalOpenImages = nImages;
+for(k = 0; k < totalOpenImages; k++){
+	titleCLOSE = getTitle();
+		if (titleCLOSE != "all"){
+		close();
+		}
+	}
+if (isOpen("ROI Manager")) {
+	selectWindow("ROI Manager");
+	run("Close");
+	}
+if (isOpen("Results")) {
+	selectWindow("Results");
+	run("Close");
+	}
+if (isOpen("Log")) {
+	selectWindow("Log");
+	run("Close");
+	}
+}
+
+/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/
+macro "Unify settings. [x]"{
+run("Options...", "iterations=1 count=1 black");
+run("Overlay Options...", "stroke=none width=0 fill=none set");
+run("FFT Options...", "fft");
+run("Gel Analyzer Options...", "vertical=1 horizontal=1 label invert");
+
+setOption("DebugMode", true);
+setOption("Bicubic", true);
+setOption("Display Label", true);
+setOption("Limit to Threshold", false);
+setOption("BlackBackground", true);
+}
+
+
+/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/
+/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/
+/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/
+macro ":1: Set image_name variable. [1]"{
+	image_name = getTitle();
+	image_name_cut = substring(image_name, 0, lengthOf(image_name) - 4);
+}
+/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/
+macro ":2: Set lambda_name variable. [2]"{
+	lambda_name = getTitle();
+	lambda_name_cut = substring(lambda_name, 0, lengthOf(lambda_name) - 4);
+}
+/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/
+macro ":3: Pre-processing images. [3]"{
+// Here I get basic information and some of them I assign to Global variables (in the beginning of file).
+// I create some folders as well to store processed images and results files there.
+selectWindow(image_name);
+dirIMG = getDirectory("image");
+getDimensions(width, height, channels, slices, frames);
+varFrames = frames;
+varSlices = slices;
+varWidth = width;
+varHeight = height;
+varChannels = channels;
+splitDir0 = dirIMG + "/" + image_name_cut;
+splitDirORG = dirIMG + "/" + image_name_cut + "/ORG";
+splitDirPNG = dirIMG + "/" + image_name_cut + "/PNG";
+splitDirMAS = dirIMG + "/" + image_name_cut + "/MAS";
+splitDirLAM = dirIMG + "/" + image_name_cut + "/LAM";
+File.makeDirectory(splitDir0);
+File.makeDirectory(splitDirORG);
+File.makeDirectory(splitDirPNG)
+File.makeDirectory(splitDirMAS);
+File.makeDirectory(splitDirLAM);
+
+// Here I pre-prepare image to select individual cells. Will stop in the middle to allow user "add" missing cell part if required.
+selectWindow(image_name);
+setLocation(20, 20); // Sets the position of window on the screen to top-left corner of monitor.
+run("Duplicate...", "duplicate");
+rename("perfect_copy");
+run("Make Composite");
+Stack.setPosition(6, 1, 1); // Set selected channel to 6.
+
+run("Delete Slice", "delete=channel");
+Stack.setPosition(1, 1, 1);
+
+selectImage("perfect_copy");
+run("Z Project...", "projection=[Sum Slices]");
+selectImage("SUM_perfect_copy");
+rename("ImageMask");
+run("8-bit");
+
+setAutoThreshold("Default dark no-reset"); // This was set to make sure settings are uniform between computers.
+setThreshold(90, 255);
+run("Convert to Mask");
+
+run("Fill Holes");
+run("Yellow");
+setForegroundColor(255, 255, 255);
+setLocation(560, 20);
+
+run("Line Width...", "line=2");
+setTool("freeline");
+run("Colors...", "foreground=white background=black selection=red");
+}
+
+/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/
+macro "draw [d]"{
+roiManager("Add");
+roiManager("Select", 0);
+run("Draw", "slice"); // The drawn shape remains only in this slice.
+selectWindow("ImageMask");
+setForegroundColor(255, 255, 255); // White.
+roiManager("Select", 0);
+run("Draw", "slice");
+run("Select None");
+setForegroundColor(255, 0, 0); // Red.
+
+// Avoids error "no window with name xxx opened".
+if (isOpen("drawboard")) {
+	selectWindow("ImageMask");
+	setForegroundColor(0, 0, 0); // Black.
+	roiManager("Select", 0);
+	run("Draw", "slice");
+	run("Select None");
+	selectWindow("drawboard");
+	run("Select None");
+	run("Select None");
+	}
+roiManager("Select", 0);
+roiManager("Delete");
+}
+
+/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/
+macro "erase [e]"{
+roiManager("Add");
+roiManager("Select", 0);
+run("Draw", "slice"); // The drawn shape remains only in this slice.
+setForegroundColor(0, 0, 0); // Black.
+roiManager("Select", 0);
+run("Draw", "slice");
+run("Select None");
+setForegroundColor(255, 0, 0); // Red.
+roiManager("reset");
+}
+
+/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/
+// This part follows the separation of the cells. After this it stops and allows user to use "d" macro to further separate cells.
+// Draw on the new, disposable "drawboard" window.
+macro ":4: Pre-processing images. [4]"{
+selectWindow("ImageMask");
+run("Convert to Mask");
+run("Fill Holes");
+setForegroundColor(255, 255, 255);
+
+selectWindow(image_name);
+run("Duplicate...", "title=drawboard channels=1");
+run("RGB Color");
+setForegroundColor(255, 0, 0);	// Red.
+run("Line Width...", "line=2");
+setTool("freeline");
+// This lines can be modified to your liking as to make cells most visible to your eyes.
+run("8-bit");
+run("ICA");
+}
+
+/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/
+macro "Extract cells and save results. [5]"{
+// This part finalizes cell separation and iterates thru ROIs to analyse them and save them.
+selectWindow("ImageMask");
+run("Set Measurements...", "area centroid perimeter bounding fit shape feret's redirect=None decimal=2");
+run("Analyze Particles...", "size=2-Infinity circularity=0.20-1.00 display exclude clear add");
+
+
+// This part is added just because sometimes ImageJ seems to behave weirdly on different computers.
+setForegroundColor(255, 255, 255);
+setBackgroundColor(0, 0, 0);
+selectWindow("ImageMask");
+run("Hide Overlay");
+run("Select None");
+run("Select All");
+run("Clear", "slice");
+run("Select None");
+
+
+nROIs = roiManager("count");
+for (k = 0; k <= nROIs-1; k++){
+	roiManager("Select", k);
+	run("Fill", "slice");
+	}
+run("Select None");
+run("Convert to Mask");
+
+run("Duplicate...", "title=MaskSave");
+selectWindow("MaskSave");
+roiManager("Show All with labels");
+run("Flatten");
+
+
+// Saves overlay mask. To know, if needed, which cell is which (by number assigned in RoiManager).
+saveAs("TIFF", splitDir0 + "/" + image_name_cut + "_mask.tif");
+close();
+
+// Saving basic Results, 21 columns.
+selectWindow("Results");
+saveAs("Results", splitDir0 + "/" + image_name_cut + "_results.csv");
+run("Close");
+
+selectWindow("ImageMask");
+roiManager("Show None");
+
+
+// Counting ROIs and preparing arrays to populate with cell data later.
+nROIs = roiManager("count");
+ListaFolderow = newArray(nROIs);
+ListaNazw = newArray(nROIs);
+ListaLamFold = newArray(nROIs);
+ListaLamNazw = newArray(nROIs);
+ListaMaskFolderow = newArray(nROIs);
+ListaMaskNazw = newArray(nROIs);
+
+
+arrayCH1x = newArray(nROIs);
+arrayCH2x = newArray(nROIs);
+arrayCH3x = newArray(nROIs);
+arrayCH4x = newArray(nROIs);
+arrayCH5x = newArray(nROIs);
+arrayCH6x = newArray(nROIs);
+
+arrayCH1i = newArray(nROIs);
+arrayCH2i = newArray(nROIs);
+arrayCH3i = newArray(nROIs);
+arrayCH4i = newArray(nROIs);
+arrayCH5i = newArray(nROIs);
+arrayCH6i = newArray(nROIs);
+
+arrayCH1o = newArray(nROIs);
+arrayCH2o = newArray(nROIs);
+arrayCH3o = newArray(nROIs);
+arrayCH4o = newArray(nROIs);
+arrayCH5o = newArray(nROIs);
+arrayCH6o = newArray(nROIs);
+
+arrayL1x = newArray(nROIs);
+arrayL2x = newArray(nROIs);
+arrayL3x = newArray(nROIs);
+arrayL4x = newArray(nROIs);
+arrayL5x = newArray(nROIs);
+arrayL6x = newArray(nROIs);
+arrayL7x = newArray(nROIs);
+arrayL8x = newArray(nROIs);
+arrayL9x = newArray(nROIs);
+arrayL10x = newArray(nROIs);
+arrayL11x = newArray(nROIs);
+arrayL12x = newArray(nROIs);
+arrayL13x = newArray(nROIs);
+arrayL14x = newArray(nROIs);
+arrayL15x = newArray(nROIs);
+arrayL16x = newArray(nROIs);
+arrayL17x = newArray(nROIs);
+arrayL18x = newArray(nROIs);
+arrayL19x = newArray(nROIs);
+arrayL20x = newArray(nROIs);
+arrayL21x = newArray(nROIs);
+arrayL22x = newArray(nROIs);
+arrayL23x = newArray(nROIs);
+arrayL24x = newArray(nROIs);
+arrayL25x = newArray(nROIs);
+arrayL26x = newArray(nROIs);
+arrayL27x = newArray(nROIs);
+arrayL28x = newArray(nROIs);
+arrayL29x = newArray(nROIs);
+arrayL30x = newArray(nROIs);
+arrayL31x = newArray(nROIs);
+arrayL32x = newArray(nROIs);
+
+arrayL1i = newArray(nROIs);
+arrayL2i = newArray(nROIs);
+arrayL3i = newArray(nROIs);
+arrayL4i = newArray(nROIs);
+arrayL5i = newArray(nROIs);
+arrayL6i = newArray(nROIs);
+arrayL7i = newArray(nROIs);
+arrayL8i = newArray(nROIs);
+arrayL9i = newArray(nROIs);
+arrayL10i = newArray(nROIs);
+arrayL11i = newArray(nROIs);
+arrayL12i = newArray(nROIs);
+arrayL13i = newArray(nROIs);
+arrayL14i = newArray(nROIs);
+arrayL15i = newArray(nROIs);
+arrayL16i = newArray(nROIs);
+arrayL17i = newArray(nROIs);
+arrayL18i = newArray(nROIs);
+arrayL19i = newArray(nROIs);
+arrayL20i = newArray(nROIs);
+arrayL21i = newArray(nROIs);
+arrayL22i = newArray(nROIs);
+arrayL23i = newArray(nROIs);
+arrayL24i = newArray(nROIs);
+arrayL25i = newArray(nROIs);
+arrayL26i = newArray(nROIs);
+arrayL27i = newArray(nROIs);
+arrayL28i = newArray(nROIs);
+arrayL29i = newArray(nROIs);
+arrayL30i = newArray(nROIs);
+arrayL31i = newArray(nROIs);
+arrayL32i = newArray(nROIs);
+
+arrayL1o = newArray(nROIs);
+arrayL2o = newArray(nROIs);
+arrayL3o = newArray(nROIs);
+arrayL4o = newArray(nROIs);
+arrayL5o = newArray(nROIs);
+arrayL6o = newArray(nROIs);
+arrayL7o = newArray(nROIs);
+arrayL8o = newArray(nROIs);
+arrayL9o = newArray(nROIs);
+arrayL10o = newArray(nROIs);
+arrayL11o = newArray(nROIs);
+arrayL12o = newArray(nROIs);
+arrayL13o = newArray(nROIs);
+arrayL14o = newArray(nROIs);
+arrayL15o = newArray(nROIs);
+arrayL16o = newArray(nROIs);
+arrayL17o = newArray(nROIs);
+arrayL18o = newArray(nROIs);
+arrayL19o = newArray(nROIs);
+arrayL20o = newArray(nROIs);
+arrayL21o = newArray(nROIs);
+arrayL22o = newArray(nROIs);
+arrayL23o = newArray(nROIs);
+arrayL24o = newArray(nROIs);
+arrayL25o = newArray(nROIs);
+arrayL26o = newArray(nROIs);
+arrayL27o = newArray(nROIs);
+arrayL28o = newArray(nROIs);
+arrayL29o = newArray(nROIs);
+arrayL30o = newArray(nROIs);
+arrayL31o = newArray(nROIs);
+arrayL32o = newArray(nROIs);
+
+
+setBatchMode("hide"); // ImageJ 1.48h+
+// Iterate through each ROI individually.
+setForegroundColor(255, 255, 255); // White.
+for (k = 0; k <= nROIs-1; k++){
+	selectWindow("ImageMask");
+	roiManager("Select", k);
+	ROIname = k + 1;
+	run("Enlarge...", "enlarge=2 pixel");
+	run("Duplicate...", "title=CopyMask duplicate");
+	selectWindow("CopyMask");
+	run("Invert");
+	run("Clear Outside");
+	run("Canvas Size...", "width=80 height=80 position=Center");
+	
+
+	makeRectangle(0, 0, 80, 80);
+	setForegroundColor(0, 0, 0); // Black.
+	run("Draw", "slice");
+	run("Select None");
+
+
+	doWand(40, 40);
+	getRawStatistics(nPixels, mean, min, max);
+	if (nPixels == 6400){
+		makeRectangle(22, 26, 31, 28); // Artificial rectangle in the centre in case selection is empty
+		}
+
+	run("Make Inverse");
+	setForegroundColor(255, 255, 255); // White.
+	run("Fill", "slice");
+	run("Select None");
+	run("Convert to Mask");
+
+	
+	// Extract cell out of image.
+	selectWindow(image_name);
+	roiManager("Select", k);
+	run("Enlarge...", "enlarge=2 pixel");
+	run("Duplicate...", "title=CopyCell duplicate");
+	selectWindow("CopyCell");
+	run("Canvas Size...", "width=80 height=80 position=Center");
+	
+	// Get mask out of image.
+	selectWindow("CopyMask");
+	run("Create Selection");
+	selectWindow("CopyCell");
+	run("Restore Selection");
+	run("Clear Outside", "stack");
+	
+	// Save cell.
+	selectWindow("CopyCell");
+	saveAs("TIFF", splitDirORG + "/" + image_name_cut + "_" + ROIname + ".tif");
+	selectWindow(image_name_cut + "_" + ROIname + ".tif");
+	
+	
+	// Populate location arrays.
+	ListaFolderow[k] = getDirectory("image");
+	ListaNazw[k] = getTitle();
+	
+
+	// Save to png folder.
+	selectWindow(image_name_cut + "_" + ROIname + ".tif");
+	Stack.setPosition(6, 1, 1); // Set selected channel to 6.
+	run("Delete Slice", "delete=channel");
+	Stack.setPosition(1, 1, 1);
+	run("RGB Color");
+	saveAs("PNG", splitDirPNG + "/" + image_name_cut + "_" + ROIname + ".png");
+	selectWindow(image_name_cut + "_" + ROIname + ".png");
+	// saveAs("TIFF", splitDirPNG + "/" + image_name_cut + "_" + ROIname + ".tif");
+	// selectWindow(image_name_cut + "_" + ROIname + ".tif");
+	close();
+	
+	selectWindow(image_name_cut + "_" + ROIname + ".tif");
+	close();
+
+
+	
+	// Save mask.
+	selectWindow("CopyMask");
+	saveAs("TIFF", splitDirMAS + "/" + image_name_cut + "_" + ROIname + "_mask.tif");
+	selectWindow(image_name_cut + "_" + ROIname + "_mask.tif");
+	rename("CopyMask");
+
+	
+	// Populate location arrays for masks.
+	ListaMaskFolderow[k] = getDirectory("image");
+	ListaMaskNazw[k] = getTitle();
+
+
+	// Extract cell out of lambda image.
+	selectWindow(lambda_name);
+	roiManager("Select", k);
+	run("Enlarge...", "enlarge=2 pixel");
+	run("Duplicate...", "title=CopyLambda duplicate");
+	selectWindow("CopyLambda");
+	run("Canvas Size...", "width=80 height=80 position=Center");
+	
+	// Get mask out of lambda image.
+	selectWindow("CopyMask");
+	run("Create Selection");
+	selectWindow("CopyLambda");
+	run("Restore Selection");
+	run("Clear Outside", "stack");
+	
+	// Save lambda cell.
+	selectWindow("CopyLambda");
+	saveAs("TIFF", splitDirLAM + "/" + lambda_name_cut + "_" + ROIname + ".tif");
+	selectWindow(lambda_name_cut + "_" + ROIname + ".tif");
+	
+	// Populate location arrays.
+	ListaLamFold[k] = getDirectory("image");
+	ListaLamNazw[k] = getTitle(); // This is the same as normal image.
+	close();
+	
+	// Close mask.
+	selectWindow("CopyMask");
+	close("CopyMask");
+	}
+
+
+run("closeAll [0]");
+setBatchMode("show");
+
+setBatchMode("hide");
+
+// Iterate thru all cells.
+nImagesToOpen = nROIs;
+for(k = 0; k < nImagesToOpen; k++){
+
+	open(ListaLamFold[k] + ListaLamNazw[k]);
+	temp_lambda_image = getTitle();
+	open(ListaFolderow[k] + ListaNazw[k]);
+	temp_image = getTitle();
+	
+	roiManager("reset");
+	roiManager("Add");
+	run("Enlarge...", "enlarge=-9 pixel");
+	roiManager("Add");
+	nROIs = roiManager("count"); // In case image after enlarging with negative number will be the same size as original = it was not able to be smaller than that number we have to take care of it to not cause an error.
+	
+	// Important ERROR handling part!
+	roiManager("Select", 0);
+	getRawStatistics(nPixels, mean, min, max);
+	varPixTestA = nPixels;
+	roiManager("Select", 1);
+	getRawStatistics(nPixels, mean, min, max);
+	varPixTestB = nPixels;
+	if(varPixTestA == varPixTestB){
+		selectWindow(temp_image);
+		makeRectangle(28, 26, 25, 26);
+		roiManager("Add");
+		roiManager("Select", 1);
+		roiManager("Delete");
+		}
+	
+	// Create cell outer ring.
+	selectWindow(temp_image);
+	roiManager("Select", newArray(0,1));
+	roiManager("XOR");
+	roiManager("Add");
+
+	roiManager("Select", 0);
+	roiManager("Rename", "roiX");
+	roiManager("Select", 1);
+	roiManager("Rename", "roiI");
+	roiManager("Select", 2);
+	roiManager("Rename", "roiO");
+	
+	// Iterate thru all 6 channels.
+	// This is very "uprofessional" but very clean to understand. Instead of making one big loop. I split it into 6 loops.
+	selectWindow(temp_image);
+	Stack.setPosition(1, 1, 1);
+	for(c = 1; c < 7; c++){
+		// selectWindow(temp_image);
+		Stack.setPosition(c, 1, 1);
+		
+		if(c == 1){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayCH1x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayCH1i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayCH1o[k] = mean;
+			}
+		else if(c == 2){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayCH2x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayCH2i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayCH2o[k] = mean;
+			}
+		else if(c == 3){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayCH3x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayCH3i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayCH3o[k] = mean;
+			}
+		else if(c == 4){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayCH4x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayCH4i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayCH4o[k] = mean;
+			}
+		else if(c == 5){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayCH5x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayCH5i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayCH5o[k] = mean;
+			}
+		else if(c == 6){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayCH6x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayCH6i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayCH6o[k] = mean;
+			}
+	}
+	selectWindow(temp_image);
+	close();
+	
+	
+	selectWindow(temp_lambda_image);
+	// Important ERROR handling part!
+	roiManager("Select", 0);
+	getRawStatistics(nPixels, mean, min, max);
+	varPixTestA = nPixels;
+	roiManager("Select", 1);
+	getRawStatistics(nPixels, mean, min, max);
+	varPixTestB = nPixels;
+	if(varPixTestA == varPixTestB){
+		selectWindow(temp_lambda_image);
+		makeRectangle(28, 26, 25, 26);
+		roiManager("Add");
+		roiManager("Select", 1);
+		roiManager("Delete");
+		}
+
+	
+	lamSlices = nSlices();
+	for(d=1; d<=lamSlices; d++){
+		Stack.setPosition(d, 1, 1);
+		if(d == 1){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL1x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL1i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL1o[k] = mean;
+			}
+		else if(d == 2){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL2x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL2i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL2o[k] = mean;
+			}
+		else if(d == 3){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL3x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL3i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL3o[k] = mean;
+			}
+		else if(d == 4){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL4x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL4i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL4o[k] = mean;
+			}
+		else if(d == 5){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL5x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL5i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL5o[k] = mean;
+			}
+		else if(d == 6){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL6x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL6i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL6o[k] = mean;
+			}
+		else if(d == 7){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL7x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL7i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL7o[k] = mean;
+			}
+		else if(d == 8){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL8x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL8i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL8o[k] = mean;
+			}
+		else if(d == 9){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL9x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL9i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL9o[k] = mean;
+			}
+		else if(d == 10){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL10x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL10i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL10o[k] = mean;
+			}
+		else if(d == 11){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL11x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL11i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL11o[k] = mean;
+			}
+		else if(d == 12){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL12x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL12i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL12o[k] = mean;
+			}
+		else if(d == 13){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL13x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL13i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL13o[k] = mean;
+			}
+		else if(d == 14){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL14x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL14i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL14o[k] = mean;
+			}
+		else if(d == 15){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL15x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL15i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL15o[k] = mean;
+			}
+		else if(d == 16){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL16x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL16i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL16o[k] = mean;
+			}
+		else if(d == 17){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL17x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL17i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL17o[k] = mean;
+			}
+		else if(d == 18){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL18x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL18i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL18o[k] = mean;
+			}
+		else if(d == 19){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL19x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL19i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL19o[k] = mean;
+			}
+		else if(d == 20){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL20x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL20i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL20o[k] = mean;
+			}
+		else if(d == 21){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL21x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL21i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL21o[k] = mean;
+			}
+		else if(d == 22){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL22x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL22i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL22o[k] = mean;
+			}
+		else if(d == 23){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL23x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL23i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL23o[k] = mean;
+			}
+		else if(d == 24){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL24x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL24i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL24o[k] = mean;
+			}
+		else if(d == 25){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL25x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL25i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL25o[k] = mean;
+			}
+		else if(d == 26){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL26x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL26i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL26o[k] = mean;
+			}
+		else if(d == 27){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL27x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL27i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL27o[k] = mean;
+			}
+		else if(d == 28){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL28x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL28i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL28o[k] = mean;
+			}
+		else if(d == 29){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL29x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL29i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL29o[k] = mean;
+			}
+		else if(d == 30){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL30x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL30i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL30o[k] = mean;
+			}
+		else if(d == 31){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL31x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL31i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL31o[k] = mean;
+			}
+		else if(d == 32){
+			roiManager("Select", 0);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL32x[k] = mean;
+			roiManager("Select", 1);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL32i[k] = mean;
+			roiManager("Select", 2);
+			getRawStatistics(nPixels, mean, min, max);
+			arrayL32o[k] = mean;
+			}
+		}
+	
+
+	// Clearing results window.
+	roiManager("reset");
+	}
+	
+// Create final Results.
+for(k=0;k<nImagesToOpen;k++){
+	setResult("name", k, ListaNazw[k]);
+	setResult("ch1x", k, arrayCH1x[k]);
+	setResult("ch1i", k, arrayCH1i[k]);
+	setResult("ch1o", k, arrayCH1o[k]);
+	
+	setResult("ch2x", k, arrayCH2x[k]);
+	setResult("ch2i", k, arrayCH2i[k]);
+	setResult("ch2o", k, arrayCH2o[k]);
+	
+	setResult("ch3x", k, arrayCH3x[k]);
+	setResult("ch3i", k, arrayCH3i[k]);
+	setResult("ch3o", k, arrayCH3o[k]);
+	
+	setResult("ch4x", k, arrayCH4x[k]);
+	setResult("ch4i", k, arrayCH4i[k]);
+	setResult("ch4o", k, arrayCH4o[k]);
+
+	setResult("ch5x", k, arrayCH5x[k]);
+	setResult("ch5i", k, arrayCH5i[k]);
+	setResult("ch5o", k, arrayCH5o[k]);
+
+	setResult("ch6x", k, arrayCH6x[k]);
+	setResult("ch6i", k, arrayCH6i[k]);
+	setResult("ch6o", k, arrayCH6o[k]);
+	
+	setResult("L1x", k, arrayL1x[k]);
+	setResult("L1i", k, arrayL1i[k]);
+	setResult("L1o", k, arrayL1o[k]);
+	
+	setResult("L2x", k, arrayL2x[k]);
+	setResult("L2i", k, arrayL2i[k]);
+	setResult("L2o", k, arrayL2o[k]);
+	
+	setResult("L3x", k, arrayL3x[k]);
+	setResult("L3i", k, arrayL3i[k]);
+	setResult("L3o", k, arrayL3o[k]);
+	
+	setResult("L4x", k, arrayL4x[k]);
+	setResult("L4i", k, arrayL4i[k]);
+	setResult("L4o", k, arrayL4o[k]);
+	
+	setResult("L5x", k, arrayL5x[k]);
+	setResult("L5i", k, arrayL5i[k]);
+	setResult("L5o", k, arrayL5o[k]);
+	
+	setResult("L6x", k, arrayL6x[k]);
+	setResult("L6i", k, arrayL6i[k]);
+	setResult("L6o", k, arrayL6o[k]);
+	
+	setResult("L7x", k, arrayL7x[k]);
+	setResult("L7i", k, arrayL7i[k]);
+	setResult("L7o", k, arrayL7o[k]);
+	
+	setResult("L8x", k, arrayL8x[k]);
+	setResult("L8i", k, arrayL8i[k]);
+	setResult("L8o", k, arrayL8o[k]);
+	
+	setResult("L9x", k, arrayL9x[k]);
+	setResult("L9i", k, arrayL9i[k]);
+	setResult("L9o", k, arrayL9o[k]);
+	
+	setResult("L10x", k, arrayL10x[k]);
+	setResult("L10i", k, arrayL10i[k]);
+	setResult("L10o", k, arrayL10o[k]);
+	
+	setResult("L11x", k, arrayL11x[k]);
+	setResult("L11i", k, arrayL11i[k]);
+	setResult("L11o", k, arrayL11o[k]);
+	
+	setResult("L12x", k, arrayL12x[k]);
+	setResult("L12i", k, arrayL12i[k]);
+	setResult("L12o", k, arrayL12o[k]);
+	
+	setResult("L13x", k, arrayL13x[k]);
+	setResult("L13i", k, arrayL13i[k]);
+	setResult("L13o", k, arrayL13o[k]);
+	
+	setResult("L14x", k, arrayL14x[k]);
+	setResult("L14i", k, arrayL14i[k]);
+	setResult("L14o", k, arrayL14o[k]);
+	
+	setResult("L15x", k, arrayL15x[k]);
+	setResult("L15i", k, arrayL15i[k]);
+	setResult("L15o", k, arrayL15o[k]);
+	
+	setResult("L16x", k, arrayL16x[k]);
+	setResult("L16i", k, arrayL16i[k]);
+	setResult("L16o", k, arrayL16o[k]);
+	
+	setResult("L17x", k, arrayL17x[k]);
+	setResult("L17i", k, arrayL17i[k]);
+	setResult("L17o", k, arrayL17o[k]);
+	
+	setResult("L18x", k, arrayL18x[k]);
+	setResult("L18i", k, arrayL18i[k]);
+	setResult("L18o", k, arrayL18o[k]);
+	
+	setResult("L19x", k, arrayL19x[k]);
+	setResult("L19i", k, arrayL19i[k]);
+	setResult("L19o", k, arrayL19o[k]);
+	
+	setResult("L20x", k, arrayL20x[k]);
+	setResult("L20i", k, arrayL20i[k]);
+	setResult("L20o", k, arrayL20o[k]);
+	
+	setResult("L21x", k, arrayL21x[k]);
+	setResult("L21i", k, arrayL21i[k]);
+	setResult("L21o", k, arrayL21o[k]);
+	
+	setResult("L22x", k, arrayL22x[k]);
+	setResult("L22i", k, arrayL22i[k]);
+	setResult("L22o", k, arrayL22o[k]);
+	
+	setResult("L23x", k, arrayL23x[k]);
+	setResult("L23i", k, arrayL23i[k]);
+	setResult("L23o", k, arrayL23o[k]);
+	
+	setResult("L24x", k, arrayL24x[k]);
+	setResult("L24i", k, arrayL24i[k]);
+	setResult("L24o", k, arrayL24o[k]);	
+	
+	setResult("L25x", k, arrayL25x[k]);
+	setResult("L25i", k, arrayL25i[k]);
+	setResult("L25o", k, arrayL25o[k]);	
+
+	setResult("L26x", k, arrayL26x[k]);
+	setResult("L26i", k, arrayL26i[k]);
+	setResult("L26o", k, arrayL26o[k]);	
+
+	setResult("L27x", k, arrayL27x[k]);
+	setResult("L27i", k, arrayL27i[k]);
+	setResult("L27o", k, arrayL27o[k]);	
+
+	setResult("L28x", k, arrayL28x[k]);
+	setResult("L28i", k, arrayL28i[k]);
+	setResult("L28o", k, arrayL28o[k]);	
+	
+	setResult("L29x", k, arrayL29x[k]);
+	setResult("L29i", k, arrayL29i[k]);
+	setResult("L29o", k, arrayL29o[k]);	
+	
+	setResult("L30x", k, arrayL30x[k]);
+	setResult("L30i", k, arrayL30i[k]);
+	setResult("L30o", k, arrayL30o[k]);	
+	
+	setResult("L31x", k, arrayL31x[k]);
+	setResult("L31i", k, arrayL31i[k]);
+	setResult("L31o", k, arrayL31o[k]);	
+
+	setResult("L32x", k, arrayL32x[k]);
+	setResult("L32i", k, arrayL32i[k]);
+	setResult("L32o", k, arrayL32o[k]);	
+	}
+
+// Here I commented some parts as for reasons unknows to me it sometimes gives error and sometimes not. Adjust to your needs.
+//selectWindow("Results");
+saveAs("Results", splitDir0 + "/" + image_name_cut + "_resultsIO.csv");
+//run("Close");
+run("closeAll [0]");
+setBatchMode("show"); // ImageJ 1.48h+
+}
+
+/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/*/
